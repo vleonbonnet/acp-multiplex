@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,9 +14,14 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 var Debug bool
+
+// agentStopTimeout is how long the agent gets to exit after its stdin is
+// closed before it is killed.
+const agentStopTimeout = 5 * time.Second
 
 func main() {
 	if len(os.Args) < 2 {
@@ -52,7 +58,10 @@ func runProxy() {
 
 	agentArgs := os.Args[1:]
 
-	cmd := exec.Command(agentArgs[0], agentArgs[1:]...)
+	// Cancelling ctx stops the agent: its stdin is closed so it can exit
+	// cleanly on EOF, and it is killed if still running after WaitDelay.
+	ctx, stopAgent := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, agentArgs[0], agentArgs[1:]...)
 	agentIn, err := cmd.StdinPipe()
 	if err != nil {
 		log.Fatalf("agent stdin pipe: %v", err)
@@ -62,6 +71,8 @@ func runProxy() {
 		log.Fatalf("agent stdout pipe: %v", err)
 	}
 	cmd.Stderr = os.Stderr
+	cmd.Cancel = agentIn.Close
+	cmd.WaitDelay = agentStopTimeout
 
 	if err := cmd.Start(); err != nil {
 		log.Fatalf("start agent: %v", err)
@@ -112,10 +123,9 @@ func runProxy() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-sigCh
-		os.Remove(sockPath)
-		cmd.Process.Kill()
-		os.Exit(0)
+		sig := <-sigCh
+		log.Printf("received %v, stopping agent", sig)
+		stopAgent()
 	}()
 
 	go proxy.Run()
