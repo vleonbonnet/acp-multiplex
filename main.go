@@ -128,6 +128,14 @@ func runProxy() {
 		stopAgent()
 	}()
 
+	// Only the primary can serve fs/* and terminal/* calls, and nothing can
+	// take its place, so the session ends when it disconnects.
+	go func() {
+		<-primary.done
+		log.Printf("primary frontend disconnected, stopping agent")
+		stopAgent()
+	}()
+
 	go proxy.Run()
 	err = cmd.Wait()
 	if err != nil {

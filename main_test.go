@@ -122,3 +122,11 @@ func logProxy(t *testing.T, dir string, pid int) {
 	}
 	t.Logf("proxy log:\n%s", b)
 }
+
+func TestProxyExitsWhenPrimaryDisconnects(t *testing.T) {
+	proxy, stdin, stdout, dir := startProxy(t)
+	initializeProxy(t, stdin, stdout)
+
+	stdin.Close()
+	waitStopped(t, proxy, dir)
+}
