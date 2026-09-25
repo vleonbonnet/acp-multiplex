@@ -12,8 +12,9 @@ import (
 	"time"
 )
 
-// TestMain lets the test binary stand in for the proxy and the agent, so
-// tests can run runProxy as a real process with a real agent subprocess.
+// TestMain lets the test binary stand in for the proxy, the agent and the
+// agent's own child, so tests can run runProxy as a real process tree.
+// Each role hands the next one its role through the environment.
 func TestMain(m *testing.M) {
 	switch os.Getenv("ACP_MULTIPLEX_TEST_HELPER") {
 	case "proxy":
@@ -21,15 +22,35 @@ func TestMain(m *testing.M) {
 		runProxy() // os.Args[1:] names this binary as the agent
 	case "agent":
 		helperAgent()
+	case "sleeper":
+		time.Sleep(time.Hour)
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
 
 // helperAgent serves mockAgent on stdio and records in the test directory
-// that it saw stdin EOF.
+// that it saw stdin EOF. With ACP_MULTIPLEX_TEST_SLEEPER set, it first
+// starts a child that never exits on its own and records its pid.
 func helperAgent() {
+	dir := os.Getenv("ACP_MULTIPLEX_TEST_DIR")
+	if os.Getenv("ACP_MULTIPLEX_TEST_SLEEPER") != "" {
+		exe, err := os.Executable()
+		if err != nil {
+			os.Exit(1)
+		}
+		sleeper := exec.Command(exe)
+		sleeper.Env = append(os.Environ(), "ACP_MULTIPLEX_TEST_HELPER=sleeper")
+		if err := sleeper.Start(); err != nil {
+			os.Exit(1)
+		}
+		// Rename so the test never reads a partial pid.
+		tmp := filepath.Join(dir, "sleeper.pid.tmp")
+		os.WriteFile(tmp, []byte(strconv.Itoa(sleeper.Process.Pid)), 0600)
+		os.Rename(tmp, filepath.Join(dir, "sleeper.pid"))
+	}
 	mockAgent(os.Stdin, os.Stdout)
-	os.WriteFile(filepath.Join(os.Getenv("ACP_MULTIPLEX_TEST_DIR"), "agent-eof"), nil, 0600)
+	os.WriteFile(filepath.Join(dir, "agent-eof"), nil, 0600)
 	os.Exit(0)
 }
 

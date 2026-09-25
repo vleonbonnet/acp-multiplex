@@ -74,6 +74,9 @@ func runProxy() {
 	cmd.Cancel = agentIn.Close
 	cmd.WaitDelay = agentStopTimeout
 
+	if err := killChildrenOnExit(); err != nil {
+		log.Printf("agent may outlive the proxy: %v", err)
+	}
 	if err := cmd.Start(); err != nil {
 		log.Fatalf("start agent: %v", err)
 	}
